@@ -3,7 +3,7 @@
 const pool = require("../config/db");
 
 const createCompany = async (companyData) => {
-  const { owner, name, phone, email, pan, gstin, address, invoice_prefix } =
+  const { owner, name, phone, email, pan, gstin, address, invoice_prefix, state } =
     companyData;
 
   const query = `INSERT INTO company (
@@ -14,8 +14,9 @@ const createCompany = async (companyData) => {
   pan, 
   gstin, 
   address, 
-  invoice_prefix) 
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8 ) 
+  invoice_prefix,
+  state) 
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9 ) 
   RETURNING *;`;
 
   const values = [
@@ -27,6 +28,7 @@ const createCompany = async (companyData) => {
     gstin,
     address,
     invoice_prefix,
+    state
   ];
 
   const result = await pool.query(query, values);

@@ -1,11 +1,8 @@
-const { createProduct } = require("../services/productService");
+const { createProduct, getProducts } = require("../services/productService");
 
-const createProductController=async(req, res)=>{
-try {
-    const product = await createProduct(
-      req.params.company_id,
-      req.body,
-    );
+const createProductController = async (req, res) => {
+  try {
+    const product = await createProduct(req.company.id, req.body);
 
     res.status(201).json({
       success: true,
@@ -20,6 +17,20 @@ try {
       message: "Internal Server Error",
     });
   }
-}
+};
 
-module.exports= {createProductController}
+const getProductController = async (req, res) => {
+  try {
+    const viewProducts = await getProducts(req.company.id);
+    res.status(200).json({
+      success: true,
+      message: "Products fetched successfully",
+      data: viewProducts,
+    });
+  } catch (error) {
+    console.log('products-->',error)
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+module.exports = { createProductController, getProductController };

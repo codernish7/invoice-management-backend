@@ -13,6 +13,7 @@ const createCompanyController = async (req, res) => {
       data: company,
     });
   } catch (error) {
+    console.log('error--->',error)
     res
       .status(500)
       .json({ success: "false", message: "Internal server error" });

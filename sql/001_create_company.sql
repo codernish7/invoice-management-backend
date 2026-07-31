@@ -7,6 +7,7 @@ CREATE TABLE company (
     pan VARCHAR(10),
     gstin VARCHAR(15),
     address TEXT,
+    state VARCHAR(50),
     invoice_prefix VARCHAR(10) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
