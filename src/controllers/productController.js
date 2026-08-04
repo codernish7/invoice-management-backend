@@ -21,7 +21,7 @@ const createProductController = async (req, res) => {
 
 const getProductController = async (req, res) => {
   try {
-    const viewProducts = await getProducts(req.company.id);
+    const viewProducts = await getProducts(req.company.id, req.query.minimal === "true");
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",

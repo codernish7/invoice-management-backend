@@ -49,10 +49,29 @@ const createClient = async (clientData, companyId) => {
   return result.rows[0];
 };
 
-const getClient = async (companyId) => {
-  const query = `SELECT * FROM client WHERE company_id =$1 ORDER BY created_at ASC;`;
-  const value = [companyId];
-  const result = await pool.query(query, value);
+const getClient = async (companyId, minimal = false) => {
+  let query = "";
+
+  if (minimal) {
+    query = `
+      SELECT
+        id,
+        client_business
+      FROM client
+      WHERE company_id = $1
+      ORDER BY client_business;
+    `;
+  } else {
+    query = `
+      SELECT *
+      FROM client
+      WHERE company_id = $1
+      ORDER BY created_at DESC;
+    `;
+  }
+
+  const result = await pool.query(query, [companyId]);
+
   return result.rows;
 };
 

@@ -1,219 +1,420 @@
 const pool = require("../config/db");
 
-const createInvoice = async (companyId, buyerId, invoiceData) => {
-  const { invoice_type, invoice_date } = invoiceData;
+const createInvoice = async (companyId, invoiceData) => {
+  console.log(companyId);
+  console.log(invoiceData);
 
-  // Get invoice prefix
-  const prefixResult = await pool.query(
-    `SELECT invoice_prefix
-     FROM company
-     WHERE id = $1`,
-    [companyId],
-  );
+  const { client_id, invoice_type, status, invoice_date, items } = invoiceData;
 
-  const prefix = prefixResult.rows[0].invoice_prefix;
+  if (!client_id) {
+    throw new Error("Client is required");
+  }
 
-  // Generate unique invoice number
-  const uniqueNumber = Date.now();
+  const clientQuery = `
+        SELECT
+            id,
+            state
+        FROM client
+        WHERE id=$1
+        AND company_id=$2
+      `;
 
-  const invoiceNumber = `${prefix}-${uniqueNumber}`;
+  const clientResult = await pool.query(clientQuery, [client_id, companyId]);
 
-  const query = `
-      INSERT INTO invoices
-      (
-        company_id,
-        buyer_id,
-        invoice_type,
-        invoice_number,
-        invoice_date,
-        subtotal,
-        grand_total
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,0,0
-      )
-      RETURNING *;
-  `;
+  if (clientResult.rows.length === 0) {
+    throw new Error("Client not found");
+  }
 
-  const values = [
+  const client = clientResult.rows[0];
+  const clientState = client.state;
+
+  if (!invoice_type) {
+    throw new Error("Invoice type is required");
+  }
+
+  if (!items || items.length === 0) {
+    throw new Error("Invoice must contain at least one item");
+  }
+
+  const companyQuery = `
+        SELECT
+          invoice_prefix,
+          state
+        FROM company
+        WHERE id=$1
+      `;
+
+  const companyResult = await pool.query(companyQuery, [companyId]);
+
+  if (companyResult.rows.length === 0) {
+    throw new Error("Company not found");
+  }
+
+  const company = companyResult.rows[0];
+  const companyState = company.state;
+
+  const productIds = items.map((item) => item.product_id);
+
+  const productQuery = `
+        SELECT
+          id,
+          product_name,
+          hsn_code,
+          unit,
+          gst_percent
+        FROM products
+        WHERE company_id = $1
+        AND id = ANY($2)
+      `;
+  const productResult = await pool.query(productQuery, [companyId, productIds]);
+
+  if (productResult.rows.length !== productIds.length) {
+    throw new Error("One or more products were not found");
+  }
+
+  const products = productResult.rows;
+
+  const productMap = {};
+
+  products.forEach((product) => {
+    productMap[product.id] = product;
+  });
+
+  const invoiceItems = [];
+
+  let subtotal = 0;
+  let totalGST = 0;
+
+  for (const item of items) {
+    const product = productMap[item.product_id];
+    const lineTotal = item.quantity * item.rate;
+    const gstAmount = (lineTotal * product.gst_percent) / 100;
+    subtotal += lineTotal;
+    totalGST += gstAmount;
+    invoiceItems.push({
+      product_id: product.id,
+
+      product_name: product.product_name,
+
+      hsn_code: product.hsn_code,
+
+      unit: product.unit,
+
+      quantity: item.quantity,
+
+      rate: item.rate,
+
+      gst_percent: product.gst_percent,
+
+      line_total: lineTotal,
+
+      gst_amount: gstAmount,
+    });
+  }
+
+  let cgstAmount = 0;
+  let sgstAmount = 0;
+  let igstAmount = 0;
+
+  if (companyState === clientState) {
+    cgstAmount = totalGST / 2;
+    sgstAmount = totalGST / 2;
+  } else {
+    igstAmount = totalGST;
+  }
+
+  const grandTotal = subtotal + totalGST;
+
+  const db = await pool.connect();
+
+  try {
+    await db.query("BEGIN");
+
+    const companyCounterQuery = `SELECT invoice_prefix, next_invoice_number FROM company WHERE id = $1 FOR UPDATE`;
+
+    const companyCounterResult = await db.query(companyCounterQuery, [
+      companyId,
+    ]);
+
+    const companyData = companyCounterResult.rows[0];
+
+    const currentYear = new Date().getFullYear();
+    const invoiceNumber = `${companyData.invoice_prefix}-${currentYear}-${String(companyData.next_invoice_number).padStart(6, "0")}`;
+
+    const updateCounterQuery = `UPDATE company
+                                SET next_invoice_number = next_invoice_number + 1
+                                WHERE id = $1
+                                `;
+
+    await db.query(updateCounterQuery, [companyId]);
+
+    const invoiceInsertQuery = `
+INSERT INTO invoices
+(
+company_id,
+client_id,
+invoice_type,
+invoice_number,
+status,
+cgst_amount,
+sgst_amount,
+igst_amount,
+subtotal,
+grand_total,
+invoice_date
+)
+VALUES
+(
+$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+)
+RETURNING id;
+`;
+
+const invoiceInsertValues = [
     companyId,
-    buyerId,
+    client_id,
     invoice_type,
     invoiceNumber,
-    invoice_date,
-  ];
+    status,
+    cgstAmount,
+    sgstAmount,
+    igstAmount,
+    subtotal,
+    grandTotal,
+    invoice_date
+];
 
-  const result = await pool.query(query, values);
+const invoiceResult = await db.query(
+    invoiceInsertQuery,
+    invoiceInsertValues
+);
 
-  return result.rows[0];
-};
+const invoiceId = invoiceResult.rows[0].id;
 
-const createInvoiceItem = async (invoiceId, productId, invoiceItemData) => {
-  const { quantity } = invoiceItemData;
+    
 
-  // Get product price
-  const productResult = await pool.query(
-    `SELECT selling_price
-     FROM products
-     WHERE id = $1`,
-    [productId],
-  );
+    invoiceItems.forEach((item) => (item.invoice_id = invoiceId));
 
-  const rate = Number(productResult.rows[0].selling_price);
+    const placeholders = [];
+    const values = [];
 
-  const lineTotal = rate * quantity;
+    invoiceItems.forEach((item, index) => {
+      const base = index * 10;
 
-  // Insert invoice item
-  const insertQuery = `
+      placeholders.push(
+        `($${base + 1},
+              $${base + 2},
+              $${base + 3},
+              $${base + 4},
+              $${base + 5},
+              $${base + 6},
+              $${base + 7},
+              $${base + 8},
+              $${base + 9},
+              $${base + 10})`,
+      );
+
+      values.push(
+        item.invoice_id,
+
+        item.product_id,
+
+        item.product_name,
+
+        item.hsn_code,
+
+        item.unit,
+
+        item.quantity,
+
+        item.rate,
+
+        item.gst_percent,
+
+        item.line_total,
+
+        item.gst_amount,
+      );
+    });
+
+    const invoiceItemQuery = `
       INSERT INTO invoice_items
       (
-        invoice_id,
-        product_id,
-        quantity,
-        rate,
-        line_total
+      invoice_id,
+      product_id,
+      product_name,
+      hsn_code,
+      unit,
+      quantity,
+      rate,
+      gst_percent,
+      line_total,
+      gst_amount
       )
+
       VALUES
-      (
-        $1,$2,$3,$4,$5
-      )
-      RETURNING *;
-  `;
 
-  const insertValues = [invoiceId, productId, quantity, rate, lineTotal];
+      ${placeholders.join(",")}
 
-  const result = await pool.query(insertQuery, insertValues);
+      RETURNING *;`;
 
-  // Calculate subtotal
-  const subtotalResult = await pool.query(
-    `
-    SELECT SUM(line_total) AS subtotal
-    FROM invoice_items
-    WHERE invoice_id = $1
-    `,
-    [invoiceId],
-  );
+    const invoiceItemResult = await db.query(invoiceItemQuery, values);
 
-  const subtotal = subtotalResult.rows[0].subtotal;
+    await db.query("COMMIT");
 
-  // Update invoice totals
-  await pool.query(
-    `
-    UPDATE invoices
-    SET subtotal = $1,
-        grand_total = $1,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = $2
-    `,
-    [subtotal, invoiceId],
-  );
+    return {
+      invoice_id: invoiceId,
 
-  return result.rows[0];
+      invoice_number: invoiceNumber,
+
+      subtotal,
+
+      cgstAmount,
+
+      sgstAmount,
+
+      igstAmount,
+
+      grandTotal,
+
+      items: invoiceItemResult.rows,
+    };
+  } catch (error) {
+    await db.query("ROLLBACK");
+
+    throw error;
+  } finally {
+    db.release();
+  }
 };
 
-const getInvoice = async (invoiceId) => {
-  const query = `
-    SELECT
 
+
+const getInvoice = async (companyId, invoiceId) => {
+  const invoiceQuery = `
+    SELECT
+      -- Invoice
+      i.id,
       i.invoice_number,
-      i.invoice_date,
       i.invoice_type,
+      i.status,
+      i.invoice_date,
       i.subtotal,
+      i.cgst_amount,
+      i.sgst_amount,
+      i.igst_amount,
       i.grand_total,
 
+      -- Company
+      c.id AS company_id,
       c.name AS company_name,
-      c.owner,
-      c.phone AS company_phone,
+      c.owner AS company_owner,
       c.email AS company_email,
-      c.address AS company_address,
+      c.phone AS company_phone,
       c.gstin AS company_gstin,
+      c.pan AS company_pan,
+      c.address AS company_address,
+      c.state AS company_state,
 
-      b.buyer_name,
-      b.business_name,
-      b.phone AS buyer_phone,
-      b.email AS buyer_email,
-      b.address AS buyer_address,
-      b.gstin AS buyer_gstin,
-
-      p.product_name,
-
-      ii.quantity,
-      ii.rate,
-      ii.line_total
+      -- Client
+      cl.id AS client_id,
+      cl.name AS client_name,
+      cl.email AS client_email,
+      cl.phone AS client_phone,
+      cl.gstin AS client_gstin,
+      cl.pan AS client_pan,
+      cl.address AS client_address,
+      cl.state AS client_state,
+      cl.client_business
 
     FROM invoices i
 
     JOIN company c
       ON i.company_id = c.id
 
-    JOIN buyers b
-      ON i.buyer_id = b.id
+    JOIN client cl
+      ON i.client_id = cl.id
 
-    JOIN invoice_items ii
-      ON i.id = ii.invoice_id
-
-    JOIN products p
-      ON ii.product_id = p.id
-
-    WHERE i.id = $1;
+    WHERE
+      i.id = $1
+      AND i.company_id = $2;
   `;
 
-  const result = await pool.query(query, [invoiceId]);
+  const invoiceResult = await pool.query(invoiceQuery, [
+    invoiceId,
+    companyId,
+  ]);
 
-  const rows = result.rows;
-
-  if (rows.length === 0) {
-    return null;
+  if (invoiceResult.rows.length === 0) {
+    throw new Error("Invoice not found");
   }
 
-  const invoice = {
-    invoice_number: rows[0].invoice_number,
-    invoice_date: rows[0].invoice_date,
-    invoice_type: rows[0].invoice_type,
-    subtotal: rows[0].subtotal,
-    grand_total: rows[0].grand_total,
-  };
+  const invoice = invoiceResult.rows[0];
 
-  const company = {
-    name: rows[0].company_name,
-    owner: rows[0].owner,
-    phone: rows[0].company_phone,
-    email: rows[0].company_email,
-    address: rows[0].company_address,
-    gstin: rows[0].company_gstin,
-  };
+  const itemQuery = `
+    SELECT
+      id,
+      product_id,
+      product_name,
+      hsn_code,
+      unit,
+      quantity,
+      rate,
+      gst_percent,
+      gst_amount,
+      line_total
+    FROM invoice_items
+    WHERE invoice_id = $1
+    ORDER BY id;
+  `;
 
-  const buyer = {
-    buyer_name: rows[0].buyer_name,
-    business_name: rows[0].business_name,
-    phone: rows[0].buyer_phone,
-    email: rows[0].buyer_email,
-    address: rows[0].buyer_address,
-    gstin: rows[0].buyer_gstin,
-  };
-
-  const items = [];
-
-  rows.forEach((row) => {
-    items.push({
-      product_name: row.product_name,
-      quantity: row.quantity,
-      rate: row.rate,
-      line_total: row.line_total,
-    });
-  });
+  const itemResult = await pool.query(itemQuery, [invoiceId]);
 
   return {
-    invoice,
-    company,
-    buyer,
-    items,
+    company: {
+      id: invoice.company_id,
+      owner: invoice.company_owner,
+      name: invoice.company_name,
+      email: invoice.company_email,
+      phone: invoice.company_phone,
+      gstin: invoice.company_gstin,
+      pan: invoice.company_pan,
+      address: invoice.company_address,
+      state: invoice.company_state,
+    },
+
+    client: {
+      id: invoice.client_id,
+      name: invoice.client_name,
+      email: invoice.client_email,
+      phone: invoice.client_phone,
+      gstin: invoice.client_gstin,
+      pan: invoice.client_pan,
+      address: invoice.client_address,
+      state: invoice.client_state,
+      client_business: invoice.client_business,
+    },
+
+    invoice: {
+      id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      invoice_type: invoice.invoice_type,
+      status: invoice.status,
+      invoice_date: invoice.invoice_date,
+      subtotal: invoice.subtotal,
+      cgst_amount: invoice.cgst_amount,
+      sgst_amount: invoice.sgst_amount,
+      igst_amount: invoice.igst_amount,
+      grand_total: invoice.grand_total,
+    },
+
+    items: itemResult.rows,
+    total_items: itemResult.rows.length
   };
 };
 
+
+
 module.exports = {
-  createInvoice,
-  createInvoiceItem,
-  getInvoice,
+  createInvoice,getInvoice
 };

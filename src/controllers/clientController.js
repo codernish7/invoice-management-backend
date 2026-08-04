@@ -18,7 +18,7 @@ const createClientController = async (req, res) => {
 const getClientController = async(req,res)=>{
   
   try {
-    const viewClients = await getClient(req.company.id)
+    const viewClients = await getClient(req.company.id, req.query.minimal === "true" )
     res.status(200).json({
       success: true,
       message: "Clients fetched successfully",
