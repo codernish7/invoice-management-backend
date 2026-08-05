@@ -1,4 +1,4 @@
-const {createInvoice, getInvoice} = require("../services/invoiceService");
+const {createInvoice, getInvoice, downloadInvoicePDF} = require("../services/invoiceService");
 
 const createInvoiceController = async (req, res) => {
   try {
@@ -37,9 +37,32 @@ const getInvoiceController = async (req, res) => {
   }
 };
 
+const downloadInvoicePDFController = async (req, res) => {
+  try {
+    const companyId = req.company.id;
+    const invoiceId = req.params.id;
+
+    const pdf = await downloadInvoicePDF(companyId, invoiceId);
+
+    res.setHeader("Content-Type", "application/pdf");
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${pdf.invoiceNumber}.pdf"`
+    );
+
+    res.send(pdf.buffer);
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 
 
 module.exports = {
-  createInvoiceController,getInvoiceController
+  createInvoiceController,getInvoiceController,downloadInvoicePDFController
 };
 

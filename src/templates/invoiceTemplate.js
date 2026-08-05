@@ -1,112 +1,166 @@
 const generateInvoiceHTML = (data) => {
-  const { invoice, company, buyer, items } = data;
+  const { company, client, invoice, items } = data;
+
+  const formatMoney = (amount) => {
+    return Number(amount || 0).toFixed(2);
+  };
+
+  const formatDate = (date) => {
+    return new Date(date).toLocaleDateString("en-IN");
+  };
 
   const itemRows = items
     .map(
-      (item) => `
-        <tr>
-            <td>${item.product_name}</td>
-            <td style="text-align:center;">${item.quantity}</td>
-            <td style="text-align:right;">₹ ${item.rate}</td>
-            <td style="text-align:right;">₹ ${item.line_total}</td>
-        </tr>
-    `
+      (item, index) => `
+<tr>
+    <td class="center">${index + 1}</td>
+    <td>${item.product_name}</td>
+    <td class="center">${item.hsn_code}</td>
+    <td class="center">${item.gst_percent}%</td>
+    <td class="center">${item.quantity}</td>
+    <td class="center">${item.unit}</td>
+    <td class="right">${formatMoney(item.rate)}</td>
+    <td class="right">${formatMoney(item.line_total)}</td>
+</tr>
+`
     )
     .join("");
 
   return `
+
 <!DOCTYPE html>
+
 <html>
 
 <head>
 
-<meta charset="UTF-8"/>
+<meta charset="UTF-8">
+
+<title>Invoice</title>
 
 <style>
 
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+}
+
 body{
-    font-family: Arial, Helvetica, sans-serif;
-    padding:40px;
-    color:#333;
+
+font-family:Arial,Helvetica,sans-serif;
+
+font-size:12px;
+
+padding:20px;
+
+color:#000;
+
 }
 
 .container{
-    width:100%;
+
+width:100%;
+
+border:2px solid black;
+
 }
 
-.header{
-    text-align:center;
-    margin-bottom:30px;
+table{
+
+width:100%;
+
+border-collapse:collapse;
+
 }
 
-.header h1{
-    margin:0;
+td,
+th{
+
+border:1px solid black;
+
+padding:6px;
+
+vertical-align:top;
+
 }
 
-.company-details{
-    margin-top:15px;
-    line-height:1.8;
+.center{
+
+text-align:center;
+
 }
 
-.invoice-info{
-    margin:30px 0;
+.right{
+
+text-align:right;
+
 }
 
-.info-table{
-    width:100%;
-    border-collapse:collapse;
+.bold{
+
+font-weight:bold;
+
 }
 
-.info-table td{
-    vertical-align:top;
-    padding:8px;
-}
+.heading{
 
-.box{
-    border:1px solid #ccc;
-    padding:12px;
+font-size:26px;
+
+font-weight:bold;
+
+text-align:center;
+
+padding:12px;
+
+border-bottom:2px solid black;
+
 }
 
 .section-title{
-    font-weight:bold;
-    margin-bottom:10px;
-    font-size:15px;
+
+font-weight:bold;
+
+margin-bottom:4px;
+
+font-size:13px;
+
 }
 
-.product-table{
-    width:100%;
-    border-collapse:collapse;
-    margin-top:25px;
+.small{
+
+font-size:11px;
+
+line-height:18px;
+
 }
 
-.product-table th{
-    border:1px solid #ddd;
-    background:#f5f5f5;
-    padding:10px;
-}
+.items th{
 
-.product-table td{
-    border:1px solid #ddd;
-    padding:10px;
-}
+background:#efefef;
 
-.total-table{
-    width:40%;
-    margin-left:auto;
-    margin-top:20px;
-    border-collapse:collapse;
 }
 
 .total-table td{
-    padding:10px;
-    border:1px solid #ddd;
+
+padding:8px;
+
 }
 
 .footer{
-    margin-top:50px;
-    text-align:center;
-    color:#777;
-    font-size:14px;
+
+height:120px;
+
+}
+
+.signature{
+
+margin-top:60px;
+
+font-weight:bold;
+
+text-align:center;
+
 }
 
 </style>
@@ -117,51 +171,178 @@ body{
 
 <div class="container">
 
-<div class="header">
+<div class="heading">
 
-<h1>${company.name}</h1>
-
-<div class="company-details">
-
-<div><strong>Owner :</strong> ${company.owner}</div>
-
-<div><strong>GSTIN :</strong> ${company.gstin}</div>
-
-<div><strong>Phone :</strong> ${company.phone}</div>
-
-<div><strong>Email :</strong> ${company.email}</div>
-
-<div><strong>Address :</strong> ${company.address}</div>
+TAX INVOICE
 
 </div>
 
+<table>
+
+<tr>
+
+<td width="40%">
+
+<div class="section-title">
+
+Seller
+
 </div>
 
-<hr/>
+<div class="bold">
 
-<div class="invoice-info">
+${company.name}
 
-<table class="info-table">
+</div>
+
+<div class="small">
+
+${company.address}
+
+<br>
+
+State : ${company.state}
+
+<br>
+
+GSTIN : ${company.gstin}
+
+<br>
+
+PAN : ${company.pan}
+
+<br>
+
+Phone : ${company.phone}
+
+<br>
+
+Email : ${company.email}
+
+</div>
+
+</td>
+
+<td width="35%">
+
+<div class="section-title">
+
+Buyer
+
+</div>
+
+<div class="bold">
+
+${client.client_business}
+
+</div>
+
+<div class="small">
+
+${client.name}
+
+<br>
+
+${client.address}
+
+<br>
+
+State : ${client.state}
+
+<br>
+
+GSTIN : ${client.gstin}
+
+<br>
+
+PAN : ${client.pan}
+
+<br>
+
+Phone : ${client.phone}
+
+</div>
+
+</td>
+
+<td width="25%">
+
+<table>
+
+<tr>
+
+<td class="bold">
+
+Invoice No
+
+</td>
+
+</tr>
 
 <tr>
 
 <td>
 
-<strong>Invoice Number</strong><br/>
 ${invoice.invoice_number}
 
 </td>
 
-<td>
+</tr>
 
-<strong>Invoice Date</strong><br/>
-${invoice.invoice_date}
+<tr>
+
+<td class="bold">
+
+Invoice Date
 
 </td>
 
+</tr>
+
+<tr>
+
 <td>
 
-<strong>Invoice Type</strong><br/>
+${formatDate(invoice.invoice_date)}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td class="bold">
+
+Status
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+${invoice.status}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td class="bold">
+
+Type
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
 ${invoice.invoice_type}
 
 </td>
@@ -170,118 +351,385 @@ ${invoice.invoice_type}
 
 </table>
 
-</div>
-
-<table class="info-table">
-
-<tr>
-
-<td width="50%">
-
-<div class="box">
-
-<div class="section-title">
-
-Bill To
-
-</div>
-
-<div><strong>${buyer.business_name}</strong></div>
-
-<div>${buyer.buyer_name}</div>
-
-<div>${buyer.address}</div>
-
-<div>${buyer.phone}</div>
-
-<div>${buyer.email}</div>
-
-<div>GSTIN : ${buyer.gstin}</div>
-
-</div>
-
-</td>
-
-<td width="50%">
-
-<div class="box">
-
-<div class="section-title">
-
-Delivery Address
-
-</div>
-
-<div><strong>${buyer.business_name}</strong></div>
-
-<div>${buyer.address}</div>
-
-</div>
-
 </td>
 
 </tr>
 
 </table>
 
-<table class="product-table">
+<br>
 
-<thead>
+<table class="items">
 
 <tr>
 
-<th align="left">Product</th>
+<th width="6%">
 
-<th>Qty</th>
+Sr
 
-<th align="right">Rate</th>
+</th>
 
-<th align="right">Amount</th>
+<th>
+
+Description
+
+</th>
+
+<th width="12%">
+
+HSN
+
+</th>
+
+<th width="10%">
+
+GST %
+
+</th>
+
+<th width="8%">
+
+Qty
+
+</th>
+
+<th width="8%">
+
+Unit
+
+</th>
+
+<th width="15%">
+
+Rate
+
+</th>
+
+<th width="18%">
+
+Amount
+
+</th>
 
 </tr>
-
-</thead>
-
-<tbody>
 
 ${itemRows}
 
-</tbody>
-
 </table>
+
+<br>
 
 <table class="total-table">
 
 <tr>
 
-<td><strong>Subtotal</strong></td>
+<td width="65%" rowspan="6">
 
-<td style="text-align:right;">₹ ${invoice.subtotal}</td>
+<div class="section-title">
+
+Amount In Words
+
+</div>
+
+<div class="small">
+
+${invoice.amount_in_words || "Amount in words will be added later"}
+
+</div>
+
+<br><br>
+
+<div class="section-title">
+
+Declaration
+
+</div>
+
+<div class="small">
+
+We declare that this invoice shows the actual price of the goods
+described and that all particulars are true and correct.
+
+</div>
+
+</td>
+
+<td class="bold">
+
+Subtotal
+
+</td>
+
+<td class="right">
+
+₹ ${formatMoney(invoice.subtotal)}
+
+</td>
 
 </tr>
 
 <tr>
 
-<td><strong>Grand Total</strong></td>
+<td class="bold">
 
-<td style="text-align:right;"><strong>₹ ${invoice.grand_total}</strong></td>
+CGST
+
+</td>
+
+<td class="right">
+
+₹ ${formatMoney(invoice.cgst_amount)}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td class="bold">
+
+SGST
+
+</td>
+
+<td class="right">
+
+₹ ${formatMoney(invoice.sgst_amount)}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td class="bold">
+
+IGST
+
+</td>
+
+<td class="right">
+
+₹ ${formatMoney(invoice.igst_amount)}
+
+</td>
+
+</tr>
+
+<tr>
+
+<td class="bold">
+
+Grand Total
+
+</td>
+
+<td class="right bold">
+
+₹ ${formatMoney(invoice.grand_total)}
+
+</td>
 
 </tr>
 
 </table>
 
-<div class="footer">
+<br>
 
-Thank you for your business!
+<table>
+
+<tr>
+
+<th colspan="6">
+
+Tax Summary
+
+</th>
+
+</tr>
+
+<tr>
+
+<th>
+
+HSN
+
+</th>
+
+<th>
+
+GST %
+
+</th>
+
+<th>
+
+Taxable Value
+
+</th>
+
+<th>
+
+CGST %
+
+</th>
+
+<th>
+
+CGST Amt
+
+</th>
+
+<th>
+
+SGST %
+
+</th>
+
+<th>
+
+SGST Amt
+
+</th>
+
+<th>
+
+IGST %
+
+</th>
+
+<th>
+
+IGST Amt
+
+</th>
+
+</tr>
+
+${items
+  .map((item) => {
+    const taxable = Number(item.line_total);
+    const gst = Number(item.gst_amount);
+
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
+
+    if (Number(invoice.igst_amount) > 0) {
+      igst = gst;
+    } else {
+      cgst = gst / 2;
+      sgst = gst / 2;
+    }
+
+    return `
+
+<tr>
+
+<td class="center">
+${item.hsn_code}
+</td>
+
+<td class="center">
+${item.gst_percent}%
+</td>
+
+<td class="right">
+₹ ${formatMoney(taxable)}
+</td>
+
+<td class="center">
+${cgst > 0 ? Number(item.gst_percent) / 2 : "-"}
+</td>
+
+<td class="right">
+${cgst > 0 ? "₹ " + formatMoney(cgst) : "-"}
+</td>
+
+<td class="center">
+${sgst > 0 ? Number(item.gst_percent) / 2 : "-"}
+</td>
+
+<td class="right">
+${sgst > 0 ? "₹ " + formatMoney(sgst) : "-"}
+</td>
+
+<td class="center">
+${igst > 0 ? Number(item.gst_percent) : "-"}
+</td>
+
+<td class="right">
+${igst > 0 ? "₹ " + formatMoney(igst) : "-"}
+</td>
+
+</tr>
+
+`;
+  })
+  .join("")}
+
+</table>
+
+<br>
+
+<table>
+
+<tr>
+
+<td width="60%">
+
+<div class="section-title">
+
+Bank Details
 
 </div>
+
+<div class="small">
+
+Bank Name : ${company.bank_name || "________________"}
+
+<br>
+
+Account No : ${company.account_number || "________________"}
+
+<br>
+
+IFSC : ${company.ifsc_code || "________________"}
+
+<br>
+
+Branch : ${company.branch || "________________"}
+
+</div>
+
+</td>
+
+<td width="40%">
+
+<div class="signature">
+
+For ${company.name}
+
+<br><br><br><br>
+
+Authorized Signatory
+
+</div>
+
+</td>
+
+</tr>
+
+</table>
 
 </div>
 
 </body>
 
 </html>
+
 `;
+
 };
 
 module.exports = {

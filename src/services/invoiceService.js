@@ -1,4 +1,7 @@
 const pool = require("../config/db");
+const puppeteer = require("puppeteer");
+
+const {generateInvoiceHTML} = require("../templates/invoiceTemplate");
 
 const createInvoice = async (companyId, invoiceData) => {
   console.log(companyId);
@@ -413,8 +416,51 @@ const getInvoice = async (companyId, invoiceId) => {
   };
 };
 
+const downloadInvoicePDF = async (companyId, invoiceId) => {
+
+  const invoice = await getInvoice(companyId, invoiceId);
+
+  const html = generateInvoiceHTML(invoice);
+
+  const browser = await puppeteer.launch({
+    headless: true,
+  });
+
+  try {
+
+    const page = await browser.newPage();
+
+    await page.setContent(html, {
+      waitUntil: "networkidle0",
+    });
+
+    const buffer = await page.pdf({
+      format: "A4",
+
+      printBackground: true,
+
+      margin: {
+        top: "20px",
+        bottom: "20px",
+        left: "20px",
+        right: "20px",
+      },
+    });
+
+    return {
+      invoiceNumber: invoice.invoice.invoice_number,
+      buffer,
+    };
+
+  } finally {
+
+    await browser.close();
+
+  }
+};
+
 
 
 module.exports = {
-  createInvoice,getInvoice
+  createInvoice,getInvoice,downloadInvoicePDF
 };
