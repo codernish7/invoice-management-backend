@@ -12,7 +12,7 @@ async function startServer(params) {
     await pool.query("SELECT NOW()");
     console.log("connected to pgsql db");
     app.listen(PORT, () => {
-      console.log(`server is listening on port ${PORT}`);
+      console.log(`server is listening on port suiii ${PORT}`);
     });
   } catch (error) {
     console.log("connection to db failed");
