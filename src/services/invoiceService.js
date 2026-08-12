@@ -1,7 +1,8 @@
 const pool = require("../config/db");
 const puppeteer = require("puppeteer");
 
-const {generateInvoiceHTML} = require("../templates/invoiceTemplate");
+const { generateInvoiceHTML } = require("../templates/invoiceTemplate");
+const { decrypt } = require("../utils/encryption");
 
 const createInvoice = async (companyId, invoiceData) => {
   console.log(companyId);
@@ -35,6 +36,12 @@ const createInvoice = async (companyId, invoiceData) => {
     throw new Error("Invoice type is required");
   }
 
+  const normalizedInvoiceType = String(invoice_type).trim().toUpperCase();
+
+  if (normalizedInvoiceType !== "SALE" && normalizedInvoiceType !== "PURCHASE") {
+    throw new Error("Invoice type must be SALE or PURCHASE");
+  }
+
   if (!items || items.length === 0) {
     throw new Error("Invoice must contain at least one item");
   }
@@ -56,9 +63,18 @@ const createInvoice = async (companyId, invoiceData) => {
   const company = companyResult.rows[0];
   const companyState = company.state;
 
-  const productIds = items.map((item) => item.product_id);
+  const productIds = [
+    ...new Set(
+      items
+        .map((item) => item.product_id)
+        .filter((id) => id !== undefined && id !== null && id !== ""),
+    ),
+  ];
 
-  const productQuery = `
+  const productMap = {};
+
+  if (productIds.length > 0) {
+    const productQuery = `
         SELECT
           id,
           product_name,
@@ -69,19 +85,19 @@ const createInvoice = async (companyId, invoiceData) => {
         WHERE company_id = $1
         AND id = ANY($2)
       `;
-  const productResult = await pool.query(productQuery, [companyId, productIds]);
+    const productResult = await pool.query(productQuery, [
+      companyId,
+      productIds,
+    ]);
 
-  if (productResult.rows.length !== productIds.length) {
-    throw new Error("One or more products were not found");
+    if (productResult.rows.length !== productIds.length) {
+      throw new Error("One or more products were not found");
+    }
+
+    productResult.rows.forEach((product) => {
+      productMap[product.id] = product;
+    });
   }
-
-  const products = productResult.rows;
-
-  const productMap = {};
-
-  products.forEach((product) => {
-    productMap[product.id] = product;
-  });
 
   const invoiceItems = [];
 
@@ -89,25 +105,82 @@ const createInvoice = async (companyId, invoiceData) => {
   let totalGST = 0;
 
   for (const item of items) {
-    const product = productMap[item.product_id];
+    const hasProductId =
+      item.product_id !== undefined &&
+      item.product_id !== null &&
+      item.product_id !== "";
+
+    let productId = null;
+    let productName;
+    let hsnCode = null;
+    let unit = null;
+    let gstPercent;
+
+    if (normalizedInvoiceType === "SALE") {
+      if (!hasProductId) {
+        throw new Error("Each SALE item must include product_id");
+      }
+
+      const product = productMap[item.product_id];
+
+      if (!product) {
+        throw new Error("One or more products were not found");
+      }
+
+      productId = product.id;
+      productName = product.product_name;
+      hsnCode = product.hsn_code;
+      unit = product.unit;
+      gstPercent = product.gst_percent;
+    } else if (hasProductId) {
+      const product = productMap[item.product_id];
+
+      if (!product) {
+        throw new Error("One or more products were not found");
+      }
+
+      productId = product.id;
+      productName = product.product_name;
+      hsnCode = product.hsn_code;
+      unit = product.unit;
+      gstPercent = product.gst_percent;
+    } else {
+      if (!item.product_name) {
+        throw new Error(
+          "PURCHASE items without product_id require product_name",
+        );
+      }
+
+      if (item.gst_percent === undefined || item.gst_percent === null) {
+        throw new Error(
+          "PURCHASE items without product_id require gst_percent",
+        );
+      }
+
+      productName = item.product_name;
+      hsnCode = item.hsn_code ?? null;
+      unit = item.unit ?? null;
+      gstPercent = item.gst_percent;
+    }
+
     const lineTotal = item.quantity * item.rate;
-    const gstAmount = (lineTotal * product.gst_percent) / 100;
+    const gstAmount = (lineTotal * gstPercent) / 100;
     subtotal += lineTotal;
     totalGST += gstAmount;
     invoiceItems.push({
-      product_id: product.id,
+      product_id: productId,
 
-      product_name: product.product_name,
+      product_name: productName,
 
-      hsn_code: product.hsn_code,
+      hsn_code: hsnCode,
 
-      unit: product.unit,
+      unit: unit,
 
       quantity: item.quantity,
 
       rate: item.rate,
 
-      gst_percent: product.gst_percent,
+      gst_percent: gstPercent,
 
       line_total: lineTotal,
 
@@ -176,7 +249,7 @@ RETURNING id;
 const invoiceInsertValues = [
     companyId,
     client_id,
-    invoice_type,
+    normalizedInvoiceType,
     invoiceNumber,
     status,
     cgstAmount,
@@ -293,6 +366,33 @@ const invoiceId = invoiceResult.rows[0].id;
 
 
 
+const getInvoices = async (companyId) => {
+  const query = `
+    SELECT
+      i.id,
+      i.invoice_number,
+      i.invoice_type,
+      i.status,
+      i.invoice_date,
+      i.subtotal,
+      i.cgst_amount,
+      i.sgst_amount,
+      i.igst_amount,
+      i.grand_total,
+      i.client_id,
+      cl.name AS client_name,
+      cl.client_business
+    FROM invoices i
+    JOIN client cl
+      ON i.client_id = cl.id
+    WHERE i.company_id = $1
+    ORDER BY i.invoice_date DESC, i.id DESC;
+  `;
+
+  const result = await pool.query(query, [companyId]);
+  return result.rows;
+};
+
 const getInvoice = async (companyId, invoiceId) => {
   const invoiceQuery = `
     SELECT
@@ -318,6 +418,10 @@ const getInvoice = async (companyId, invoiceId) => {
       c.pan AS company_pan,
       c.address AS company_address,
       c.state AS company_state,
+      c.bank_name AS company_bank_name,
+      c.account_number AS company_account_number,
+      c.ifsc_code AS company_ifsc_code,
+      c.branch AS company_branch,
 
       -- Client
       cl.id AS client_id,
@@ -328,7 +432,13 @@ const getInvoice = async (companyId, invoiceId) => {
       cl.pan AS client_pan,
       cl.address AS client_address,
       cl.state AS client_state,
-      cl.client_business
+      cl.client_business,
+
+      -- Client bank (encrypted account/ifsc remain as stored)
+      cbd.bank_name AS client_bank_name,
+      cbd.account_number AS client_account_number,
+      cbd.ifsc_code AS client_ifsc_code,
+      cbd.branch AS client_branch
 
     FROM invoices i
 
@@ -337,6 +447,9 @@ const getInvoice = async (companyId, invoiceId) => {
 
     JOIN client cl
       ON i.client_id = cl.id
+
+    LEFT JOIN client_bank_details cbd
+      ON cbd.client_id = cl.id
 
     WHERE
       i.id = $1
@@ -384,6 +497,10 @@ const getInvoice = async (companyId, invoiceId) => {
       pan: invoice.company_pan,
       address: invoice.company_address,
       state: invoice.company_state,
+      bank_name: invoice.company_bank_name,
+      account_number: invoice.company_account_number,
+      ifsc_code: invoice.company_ifsc_code,
+      branch: invoice.company_branch,
     },
 
     client: {
@@ -396,6 +513,10 @@ const getInvoice = async (companyId, invoiceId) => {
       address: invoice.client_address,
       state: invoice.client_state,
       client_business: invoice.client_business,
+      bank_name: invoice.client_bank_name,
+      account_number: invoice.client_account_number,
+      ifsc_code: invoice.client_ifsc_code,
+      branch: invoice.client_branch,
     },
 
     invoice: {
@@ -417,17 +538,31 @@ const getInvoice = async (companyId, invoiceId) => {
 };
 
 const downloadInvoicePDF = async (companyId, invoiceId) => {
-
   const invoice = await getInvoice(companyId, invoiceId);
 
-  const html = generateInvoiceHTML(invoice);
+  // Payee bank: SALE → company; PURCHASE → client. Decrypt only for PDF.
+  const invoiceType = String(invoice.invoice.invoice_type || "").toUpperCase();
+  const payee = invoiceType === "PURCHASE" ? invoice.client : invoice.company;
+
+  const bank = {
+    bank_name: payee.bank_name ?? null,
+    account_number: decrypt(payee.account_number),
+    ifsc_code: decrypt(payee.ifsc_code),
+    branch: payee.branch ?? null,
+  };
+
+  const pdfPayload = {
+    ...invoice,
+    bank,
+  };
+
+  const html = generateInvoiceHTML(pdfPayload);
 
   const browser = await puppeteer.launch({
     headless: true,
   });
 
   try {
-
     const page = await browser.newPage();
 
     await page.setContent(html, {
@@ -436,9 +571,7 @@ const downloadInvoicePDF = async (companyId, invoiceId) => {
 
     const buffer = await page.pdf({
       format: "A4",
-
       printBackground: true,
-
       margin: {
         top: "20px",
         bottom: "20px",
@@ -451,16 +584,16 @@ const downloadInvoicePDF = async (companyId, invoiceId) => {
       invoiceNumber: invoice.invoice.invoice_number,
       buffer,
     };
-
   } finally {
-
     await browser.close();
-
   }
 };
 
 
 
 module.exports = {
-  createInvoice,getInvoice,downloadInvoicePDF
+  createInvoice,
+  getInvoices,
+  getInvoice,
+  downloadInvoicePDF,
 };

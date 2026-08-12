@@ -1,5 +1,5 @@
 const generateInvoiceHTML = (data) => {
-  const { company, client, invoice, items } = data;
+  const { company, client, invoice, items, bank } = data;
 
   const formatMoney = (amount) => {
     return Number(amount || 0).toFixed(2);
@@ -8,6 +8,90 @@ const generateInvoiceHTML = (data) => {
   const formatDate = (date) => {
     return new Date(date).toLocaleDateString("en-IN");
   };
+
+  const invoiceType = String(invoice.invoice_type || "").toUpperCase();
+  const isPurchase = invoiceType === "PURCHASE";
+
+  // SALE: From = company, To = client; PURCHASE: From = client, To = company
+  const fromParty = isPurchase ? client : company;
+  const toParty = isPurchase ? company : client;
+  const fromIsCompany = !isPurchase;
+  const toIsCompany = isPurchase;
+
+  const renderPartyBlock = (label, party, isCompany) => {
+    if (isCompany) {
+      return `
+<div class="section-title">
+${label}
+</div>
+<div class="bold">
+${party.name || ""}
+</div>
+<div class="small">
+${party.address || ""}
+<br>
+State : ${party.state || ""}
+<br>
+GSTIN : ${party.gstin || ""}
+<br>
+PAN : ${party.pan || ""}
+<br>
+Phone : ${party.phone || ""}
+<br>
+Email : ${party.email || ""}
+</div>
+`;
+    }
+
+    return `
+<div class="section-title">
+${label}
+</div>
+<div class="bold">
+${party.client_business || ""}
+</div>
+<div class="small">
+${party.name || ""}
+<br>
+${party.address || ""}
+<br>
+State : ${party.state || ""}
+<br>
+GSTIN : ${party.gstin || ""}
+<br>
+PAN : ${party.pan || ""}
+<br>
+Phone : ${party.phone || ""}
+</div>
+`;
+  };
+
+  const payeeBank = bank || {};
+  const hasBankDetails = Boolean(
+    payeeBank.bank_name ||
+      payeeBank.account_number ||
+      payeeBank.ifsc_code ||
+      payeeBank.branch
+  );
+  // PURCHASE with no client bank row: omit bank section; SALE always shows placeholders
+  const showBankSection = !isPurchase || hasBankDetails;
+
+  const bankSectionHtml = showBankSection
+    ? `
+<div class="section-title">
+Bank Details
+</div>
+<div class="small">
+Bank Name : ${payeeBank.bank_name || "________________"}
+<br>
+Account No : ${payeeBank.account_number || "________________"}
+<br>
+IFSC : ${payeeBank.ifsc_code || "________________"}
+<br>
+Branch : ${payeeBank.branch || "________________"}
+</div>
+`
+    : "";
 
   const itemRows = items
     .map(
@@ -183,85 +267,13 @@ TAX INVOICE
 
 <td width="40%">
 
-<div class="section-title">
-
-Seller
-
-</div>
-
-<div class="bold">
-
-${company.name}
-
-</div>
-
-<div class="small">
-
-${company.address}
-
-<br>
-
-State : ${company.state}
-
-<br>
-
-GSTIN : ${company.gstin}
-
-<br>
-
-PAN : ${company.pan}
-
-<br>
-
-Phone : ${company.phone}
-
-<br>
-
-Email : ${company.email}
-
-</div>
+${renderPartyBlock("From", fromParty, fromIsCompany)}
 
 </td>
 
 <td width="35%">
 
-<div class="section-title">
-
-Buyer
-
-</div>
-
-<div class="bold">
-
-${client.client_business}
-
-</div>
-
-<div class="small">
-
-${client.name}
-
-<br>
-
-${client.address}
-
-<br>
-
-State : ${client.state}
-
-<br>
-
-GSTIN : ${client.gstin}
-
-<br>
-
-PAN : ${client.pan}
-
-<br>
-
-Phone : ${client.phone}
-
-</div>
+${renderPartyBlock("To", toParty, toIsCompany)}
 
 </td>
 
@@ -678,29 +690,7 @@ ${igst > 0 ? "₹ " + formatMoney(igst) : "-"}
 
 <td width="60%">
 
-<div class="section-title">
-
-Bank Details
-
-</div>
-
-<div class="small">
-
-Bank Name : ${company.bank_name || "________________"}
-
-<br>
-
-Account No : ${company.account_number || "________________"}
-
-<br>
-
-IFSC : ${company.ifsc_code || "________________"}
-
-<br>
-
-Branch : ${company.branch || "________________"}
-
-</div>
+${bankSectionHtml}
 
 </td>
 

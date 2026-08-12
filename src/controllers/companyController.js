@@ -4,7 +4,28 @@ const { createCompany } = require("../services/companyService");
 
 const createCompanyController = async (req, res) => {
   try {
-    //pass the request body to the imported business logic function here which will return something as a response, so business logic function will take one (req body) or more arguments (req params or anything)
+    const { bank_name, account_number, ifsc_code, branch } = req.body;
+    const hasAnyBankField =
+      bank_name != null ||
+      account_number != null ||
+      ifsc_code != null ||
+      branch != null;
+
+    if (hasAnyBankField) {
+      const missing = [];
+      if (!bank_name) missing.push("bank_name");
+      if (!account_number) missing.push("account_number");
+      if (!ifsc_code) missing.push("ifsc_code");
+      if (!branch) missing.push("branch");
+
+      if (missing.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `When providing bank details, all four fields are required: bank_name, account_number, ifsc_code, branch. Missing: ${missing.join(", ")}`,
+        });
+      }
+    }
+
     const company = await createCompany(req.body);
 
     res.status(201).json({
@@ -13,7 +34,7 @@ const createCompanyController = async (req, res) => {
       data: company,
     });
   } catch (error) {
-    console.log('error--->',error)
+    console.log("error--->", error);
     res
       .status(500)
       .json({ success: "false", message: "Internal server error" });

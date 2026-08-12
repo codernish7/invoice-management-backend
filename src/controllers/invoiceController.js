@@ -1,4 +1,9 @@
-const {createInvoice, getInvoice, downloadInvoicePDF} = require("../services/invoiceService");
+const {
+  createInvoice,
+  getInvoices,
+  getInvoice,
+  downloadInvoicePDF,
+} = require("../services/invoiceService");
 
 const createInvoiceController = async (req, res) => {
   try {
@@ -8,6 +13,23 @@ const createInvoiceController = async (req, res) => {
       success: true,
       message: "Invoice created successfully",
       data: invoice,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+const getInvoicesController = async (req, res) => {
+  try {
+    const invoices = await getInvoices(req.company.id);
+
+    res.status(200).json({
+      success: true,
+      message: "Invoices fetched successfully",
+      data: invoices,
     });
   } catch (error) {
     res.status(500).json({
@@ -63,6 +85,9 @@ const downloadInvoicePDFController = async (req, res) => {
 
 
 module.exports = {
-  createInvoiceController,getInvoiceController,downloadInvoicePDFController
+  createInvoiceController,
+  getInvoicesController,
+  getInvoiceController,
+  downloadInvoicePDFController,
 };
 
