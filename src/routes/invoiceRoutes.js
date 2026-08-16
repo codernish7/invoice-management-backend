@@ -10,7 +10,7 @@ const router = express.Router();
 
 router.post("/invoice", fakeAuth, createInvoiceController);
 router.get("/invoice/view", fakeAuth, getInvoicesController);
-router.get("/invoice/:id", fakeAuth, getInvoiceController);
-router.get("/invoice/:id/pdf", fakeAuth, downloadInvoicePDFController);
+router.get("/invoice/:invoice_id", fakeAuth, getInvoiceController);
+router.get("/invoice/:invoice_id/pdf", fakeAuth, downloadInvoicePDFController);
 
 module.exports = router;

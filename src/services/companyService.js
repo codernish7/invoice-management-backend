@@ -1,7 +1,17 @@
-//business logic function written is written in service and exported to controller, it will accept an argument and use it to query the database and do some CRUD
-
 const pool = require("../config/db");
 const { encrypt } = require("../utils/encryption");
+const { hashPassword, comparePassword } = require("../utils/password");
+
+const normalizeEmail = (email) => {
+  if (email == null) return "";
+  return String(email).trim().toLowerCase();
+};
+
+const stripPasswordHash = (row) => {
+  if (!row) return row;
+  const { password_hash, ...safe } = row;
+  return safe;
+};
 
 const createCompany = async (companyData) => {
   const {
@@ -9,6 +19,7 @@ const createCompany = async (companyData) => {
     name,
     phone,
     email,
+    password,
     pan,
     gstin,
     address,
@@ -20,42 +31,105 @@ const createCompany = async (companyData) => {
     branch,
   } = companyData;
 
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail) {
+    const err = new Error("Email is required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!password || String(password).length < 8) {
+    const err = new Error("Password must be at least 8 characters");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!owner || !name || !invoice_prefix) {
+    const err = new Error("owner, name, and invoice_prefix are required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const password_hash = await hashPassword(password);
+
   const query = `INSERT INTO company (
-  owner, 
-  name, 
-  phone, 
-  email, 
-  pan, 
-  gstin, 
-  address, 
+  owner,
+  name,
+  phone,
+  email,
+  pan,
+  gstin,
+  address,
   invoice_prefix,
   state,
   bank_name,
   account_number,
   ifsc_code,
-  branch) 
-  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) 
+  branch,
+  password_hash)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
   RETURNING *;`;
 
   const values = [
     owner,
     name,
-    phone,
-    email,
-    pan,
-    gstin,
-    address,
+    phone || null,
+    normalizedEmail,
+    pan || null,
+    gstin || null,
+    address || null,
     invoice_prefix,
-    state,
+    state || null,
     bank_name || null,
     encrypt(account_number),
     encrypt(ifsc_code),
     branch || null,
+    password_hash,
   ];
 
-  const result = await pool.query(query, values);
-
-  return result.rows[0];
+  try {
+    const result = await pool.query(query, values);
+    return stripPasswordHash(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505") {
+      const err = new Error("Email already registered");
+      err.statusCode = 409;
+      throw err;
+    }
+    throw error;
+  }
 };
 
-module.exports = { createCompany };
+const authenticateCompany = async (email, password) => {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail || password == null || String(password) === "") {
+    const err = new Error("Invalid email or password");
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const result = await pool.query(`SELECT * FROM company WHERE email = $1`, [
+    normalizedEmail,
+  ]);
+
+  if (result.rows.length === 0) {
+    const err = new Error("Invalid email or password");
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const company = result.rows[0];
+  const matches = await comparePassword(password, company.password_hash);
+
+  if (!matches) {
+    const err = new Error("Invalid email or password");
+    err.statusCode = 401;
+    throw err;
+  }
+
+  return stripPasswordHash(company);
+};
+
+module.exports = { createCompany, authenticateCompany };

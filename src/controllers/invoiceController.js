@@ -42,7 +42,7 @@ const getInvoicesController = async (req, res) => {
 const getInvoiceController = async (req, res) => {
   try {
     const companyId = req.company.id;
-    const invoiceId = req.params.id;
+    const invoiceId = req.params.invoice_id;
 
     const invoice = await getInvoice(companyId, invoiceId);
 
@@ -62,7 +62,7 @@ const getInvoiceController = async (req, res) => {
 const downloadInvoicePDFController = async (req, res) => {
   try {
     const companyId = req.company.id;
-    const invoiceId = req.params.id;
+    const invoiceId = req.params.invoice_id;
 
     const pdf = await downloadInvoicePDF(companyId, invoiceId);
 

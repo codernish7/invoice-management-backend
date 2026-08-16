@@ -63,11 +63,13 @@ const createInvoice = async (companyId, invoiceData) => {
   const company = companyResult.rows[0];
   const companyState = company.state;
 
+  // UUID strings for pg ANY($2::uuid[]) — never parseInt / Number on IDs
   const productIds = [
     ...new Set(
       items
         .map((item) => item.product_id)
-        .filter((id) => id !== undefined && id !== null && id !== ""),
+        .filter((id) => id !== undefined && id !== null && id !== "")
+        .map((id) => String(id)),
     ),
   ];
 
@@ -83,7 +85,7 @@ const createInvoice = async (companyId, invoiceData) => {
           gst_percent
         FROM products
         WHERE company_id = $1
-        AND id = ANY($2)
+        AND id = ANY($2::uuid[])
       `;
     const productResult = await pool.query(productQuery, [
       companyId,
@@ -95,7 +97,7 @@ const createInvoice = async (companyId, invoiceData) => {
     }
 
     productResult.rows.forEach((product) => {
-      productMap[product.id] = product;
+      productMap[String(product.id)] = product;
     });
   }
 
@@ -121,7 +123,7 @@ const createInvoice = async (companyId, invoiceData) => {
         throw new Error("Each SALE item must include product_id");
       }
 
-      const product = productMap[item.product_id];
+      const product = productMap[String(item.product_id)];
 
       if (!product) {
         throw new Error("One or more products were not found");
@@ -133,7 +135,7 @@ const createInvoice = async (companyId, invoiceData) => {
       unit = product.unit;
       gstPercent = product.gst_percent;
     } else if (hasProductId) {
-      const product = productMap[item.product_id];
+      const product = productMap[String(item.product_id)];
 
       if (!product) {
         throw new Error("One or more products were not found");
@@ -386,7 +388,7 @@ const getInvoices = async (companyId) => {
     JOIN client cl
       ON i.client_id = cl.id
     WHERE i.company_id = $1
-    ORDER BY i.invoice_date DESC, i.id DESC;
+    ORDER BY i.invoice_date DESC, i.created_at DESC;
   `;
 
   const result = await pool.query(query, [companyId]);
@@ -481,7 +483,7 @@ const getInvoice = async (companyId, invoiceId) => {
       line_total
     FROM invoice_items
     WHERE invoice_id = $1
-    ORDER BY id;
+    ORDER BY created_at ASC;
   `;
 
   const itemResult = await pool.query(itemQuery, [invoiceId]);
