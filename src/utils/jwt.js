@@ -21,8 +21,13 @@ const signCompanyToken = (companyId) => {
   );
 };
 
+const verifyCompanyToken = (token) => {
+  return jwt.verify(token, getJwtSecret());
+};
+
 module.exports = {
   signCompanyToken,
+  verifyCompanyToken,
   getJwtSecret,
   getJwtExpiresIn,
   COOKIE_MAX_AGE_MS,

@@ -7,20 +7,20 @@ const {
   createClientBankController,
   updateClientBankController,
 } = require("../controllers/clientBankController");
-const { fakeAuth } = require("../utils/middleware");
+const { requireAuth } = require("../utils/middleware");
 
 const router = express.Router();
 
-router.post("/client", fakeAuth, createClientController);
-router.get("/client/view", fakeAuth, getClientController);
+router.post("/client", requireAuth, createClientController);
+router.get("/client/view", requireAuth, getClientController);
 router.post(
   "/client/:clientId/bank-details",
-  fakeAuth,
+  requireAuth,
   createClientBankController
 );
 router.put(
   "/client/:clientId/bank-details",
-  fakeAuth,
+  requireAuth,
   updateClientBankController
 );
 

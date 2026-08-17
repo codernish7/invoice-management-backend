@@ -132,4 +132,88 @@ const authenticateCompany = async (email, password) => {
   return stripPasswordHash(company);
 };
 
-module.exports = { createCompany, authenticateCompany };
+const getCompanyById = async (companyId) => {
+  const result = await pool.query(`SELECT * FROM company WHERE id = $1`, [
+    companyId,
+  ]);
+
+  if (result.rows.length === 0) {
+    const err = new Error("Company not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return stripPasswordHash(result.rows[0]);
+};
+
+const EDITABLE_FIELDS = [
+  "owner",
+  "name",
+  "phone",
+  "pan",
+  "gstin",
+  "address",
+  "state",
+  "invoice_prefix",
+  "bank_name",
+  "account_number",
+  "ifsc_code",
+  "branch",
+];
+
+const updateCompany = async (companyId, updates) => {
+  const setClauses = [];
+  const values = [];
+  let paramIndex = 1;
+
+  for (const field of EDITABLE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(updates, field)) {
+      continue;
+    }
+
+    let value = updates[field];
+
+    if (field === "account_number" || field === "ifsc_code") {
+      value = encrypt(value);
+    } else if (value === "") {
+      value = null;
+    }
+
+    setClauses.push(`${field} = $${paramIndex}`);
+    values.push(value ?? null);
+    paramIndex += 1;
+  }
+
+  if (setClauses.length === 0) {
+    const err = new Error("No updatable fields provided");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  setClauses.push(`updated_at = CURRENT_TIMESTAMP`);
+  values.push(companyId);
+
+  const query = `
+    UPDATE company
+    SET ${setClauses.join(", ")}
+    WHERE id = $${paramIndex}
+    RETURNING *;
+  `;
+
+  const result = await pool.query(query, values);
+
+  if (result.rows.length === 0) {
+    const err = new Error("Company not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  return stripPasswordHash(result.rows[0]);
+};
+
+module.exports = {
+  createCompany,
+  authenticateCompany,
+  getCompanyById,
+  updateCompany,
+};

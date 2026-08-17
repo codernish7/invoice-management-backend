@@ -1,10 +1,34 @@
-// Temporary until JWT auth (TODO 14). Company id must be a UUID string — never an integer.
-// Replace with a real company.id from the DB when manually testing protected routes before login exists.
-const DEV_COMPANY_UUID = "00000000-0000-4000-8000-000000000001";
+const { verifyCompanyToken } = require("./jwt");
 
-const fakeAuth = (req, res, next) => {
-  req.company = { id: DEV_COMPANY_UUID };
-  next();
+const requireAuth = (req, res, next) => {
+  try {
+    const token = req?.cookies?.token;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    const payload = verifyCompanyToken(token);
+    const companyId = payload.sub;
+
+    if (!companyId || typeof companyId !== "string") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    req.company = { id: companyId };
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
 };
 
-module.exports = { fakeAuth };
+module.exports = { requireAuth };
