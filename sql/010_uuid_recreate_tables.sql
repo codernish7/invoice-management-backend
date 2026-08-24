@@ -1,6 +1,13 @@
 -- TODO 7: Drop/recreate all tables with UUID PKs/FKs.
 -- Source of truth: live PostgreSQL snapshot (plan TODO 2–4), not stale 001–009.
 -- Destructive: existing row data is discarded. Empty tables after this script.
+--
+-- Invoice uniqueness (business rule):
+--   UNIQUE (company_id, invoice_number) only.
+--   Different companies MAY share the same invoice_number (e.g. both INV-2026-000001).
+--   Do NOT add a global UNIQUE (invoice_number).
+--   Live upgrade from an older 010 that had invoices_invoice_number_key:
+--     ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_invoice_number_key;
 
 -- ---------------------------------------------------------------------------
 -- DROP (dependency order) + leftover SERIAL sequences
@@ -121,7 +128,7 @@ CREATE TABLE invoices (
     CONSTRAINT fk_invoice_client
         FOREIGN KEY (client_id)
         REFERENCES client(id),
-    CONSTRAINT invoices_invoice_number_key UNIQUE (invoice_number),
+    -- Invoice numbers are unique per company only (cross-company duplicates allowed).
     CONSTRAINT unique_company_invoice UNIQUE (company_id, invoice_number)
 );
 

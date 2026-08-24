@@ -27,6 +27,14 @@ const signupController = async (req, res) => {
 
     const company = await createCompany(req.body);
 
+    const token = signCompanyToken(company.id);
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: !req.headers.host.includes("localhost"),
+      maxAge: COOKIE_MAX_AGE_MS,
+    });
+
     res.status(201).json({
       success: true,
       message: "Company created successfully",
