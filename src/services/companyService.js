@@ -1,5 +1,5 @@
 const pool = require("../config/db");
-const { encrypt } = require("../utils/encryption");
+const { encrypt, decrypt } = require("../utils/encryption");
 const { hashPassword, comparePassword } = require("../utils/password");
 
 const normalizeEmail = (email) => {
@@ -11,6 +11,15 @@ const stripPasswordHash = (row) => {
   if (!row) return row;
   const { password_hash, ...safe } = row;
   return safe;
+};
+
+const withDecryptedBank = (row) => {
+  if (!row) return row;
+  return {
+    ...row,
+    account_number: decrypt(row.account_number),
+    ifsc_code: decrypt(row.ifsc_code),
+  };
 };
 
 const createCompany = async (companyData) => {
@@ -143,7 +152,7 @@ const getCompanyById = async (companyId) => {
     throw err;
   }
 
-  return stripPasswordHash(result.rows[0]);
+  return withDecryptedBank(stripPasswordHash(result.rows[0]));
 };
 
 const EDITABLE_FIELDS = [
@@ -208,7 +217,7 @@ const updateCompany = async (companyId, updates) => {
     throw err;
   }
 
-  return stripPasswordHash(result.rows[0]);
+  return withDecryptedBank(stripPasswordHash(result.rows[0]));
 };
 
 module.exports = {
