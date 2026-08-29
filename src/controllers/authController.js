@@ -82,4 +82,17 @@ const loginController = async (req, res) => {
   }
 };
 
-module.exports = { signupController, loginController };
+const logoutController = async (req, res) => {
+  try {
+    res.cookie("token", "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: !req.headers.host.includes("localhost"),
+      maxAge: 0,
+    });
+    res.status(200).json({ success: true, message: "Logout successful" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+module.exports = { signupController, loginController, logoutController };
