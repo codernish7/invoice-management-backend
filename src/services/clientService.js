@@ -49,7 +49,7 @@ const createClient = async (clientData, companyId) => {
   return result.rows[0];
 };
 
-const getClient = async (companyId, minimal = false) => {
+const getClients = async (companyId, minimal = false) => {
   let query = "";
 
   if (minimal) {
@@ -75,4 +75,61 @@ const getClient = async (companyId, minimal = false) => {
   return result.rows;
 };
 
-module.exports = { createClient, getClient };
+const getClientById = async (clientId, companyId) => {
+  const query = `SELECT * FROM client WHERE id = $1 AND company_id = $2;`;
+  const result = await pool.query(query, [clientId, companyId]);
+  if (result.rows.length === 0) {
+    throw new Error("Client not found");
+  }
+  return result.rows[0];
+};
+
+const EDITABLE_FIELDS = [
+  "name",
+  "email",
+  "phone",
+  "pan",
+  "gstin",
+  "address",
+  "client_business",
+  "onboarding_date",
+  "state",
+];
+
+const updateClient = async (clientId, clientData, companyId) => {
+  const setClauses = [];
+  const values = [];
+
+  for (const field of EDITABLE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(clientData, field)) {
+      setClauses.push(`${field} = $${values.length + 1}`);
+      values.push(clientData[field]);
+    }
+  }
+
+  if (setClauses.length === 0) {
+    throw new Error("No fields to update");
+  }
+
+  values.push(clientId);
+  values.push(companyId);
+
+  const query = `
+    UPDATE client
+    SET ${setClauses.join(", ")},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = $${values.length - 1}
+      AND company_id = $${values.length}
+    RETURNING *;
+  `;
+
+  const result = await pool.query(query, values);
+
+  if (result.rows.length === 0) {
+    throw new Error("Client not found");
+  }
+
+  return result.rows[0];
+};
+
+module.exports = { createClient, getClients, updateClient, getClientById };

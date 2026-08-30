@@ -99,7 +99,7 @@ const createCompany = async (companyData) => {
 
   try {
     const result = await pool.query(query, values);
-    return stripPasswordHash(result.rows[0]);
+    return withDecryptedBank(stripPasswordHash(result.rows[0]));
   } catch (error) {
     if (error.code === "23505") {
       const err = new Error("Email already registered");
@@ -138,7 +138,7 @@ const authenticateCompany = async (email, password) => {
     throw err;
   }
 
-  return stripPasswordHash(company);
+  return withDecryptedBank(stripPasswordHash(company));
 };
 
 const getCompanyById = async (companyId) => {

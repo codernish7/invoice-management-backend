@@ -1,7 +1,9 @@
 const express = require("express");
 const {
   createClientController,
-  getClientController,
+  getClientsController,
+  updateClientController,
+  getClientByIdController,
 } = require("../controllers/clientController");
 const {
   createClientBankController,
@@ -12,7 +14,9 @@ const { requireAuth } = require("../utils/middleware");
 const router = express.Router();
 
 router.post("/client", requireAuth, createClientController);
-router.get("/client/view", requireAuth, getClientController);
+router.get("/clients/view", requireAuth, getClientsController);
+router.get("/client/:clientId", requireAuth, getClientByIdController);
+router.patch("/client/:clientId/edit", requireAuth, updateClientController);
 router.post(
   "/client/:clientId/bank-details",
   requireAuth,
