@@ -4,6 +4,34 @@ const puppeteer = require("puppeteer");
 const { generateInvoiceHTML } = require("../templates/invoiceTemplate");
 const { decrypt } = require("../utils/encryption");
 
+let browserPromise = null;
+
+const getPdfBrowser = async () => {
+  if (!browserPromise) {
+    browserPromise = puppeteer
+      .launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+        ],
+      })
+      .then((browser) => {
+        browser.on("disconnected", () => {
+          browserPromise = null;
+        });
+        return browser;
+      })
+      .catch((error) => {
+        browserPromise = null;
+        throw error;
+      });
+  }
+
+  return browserPromise;
+};
+
 const createInvoice = async (companyId, invoiceData) => {
   console.log(companyId);
   console.log(invoiceData);
@@ -37,6 +65,12 @@ const createInvoice = async (companyId, invoiceData) => {
   }
 
   const normalizedInvoiceType = String(invoice_type).trim().toUpperCase();
+
+  const normalizedInvoiceStatus = String(status).trim().toUpperCase();
+
+  if (normalizedInvoiceStatus !== "COMPLETE" && normalizedInvoiceStatus !== "DRAFT" && normalizedInvoiceStatus !== "CANCELLED") {
+    throw new Error("Invoice status must be COMPLETE, DRAFT or CANCELLED");
+  }
 
   if (normalizedInvoiceType !== "SALE" && normalizedInvoiceType !== "PURCHASE") {
     throw new Error("Invoice type must be SALE or PURCHASE");
@@ -560,15 +594,14 @@ const downloadInvoicePDF = async (companyId, invoiceId) => {
 
   const html = generateInvoiceHTML(pdfPayload);
 
-  const browser = await puppeteer.launch({
-    headless: true,
-  });
+  const browser = await getPdfBrowser();
+  const page = await browser.newPage();
 
   try {
-    const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(60_000);
 
     await page.setContent(html, {
-      waitUntil: "networkidle0",
+      waitUntil: "domcontentloaded",
     });
 
     const buffer = await page.pdf({
@@ -587,15 +620,372 @@ const downloadInvoicePDF = async (companyId, invoiceId) => {
       buffer,
     };
   } finally {
-    await browser.close();
+    await page.close();
   }
 };
 
+const FORBIDDEN_INVOICE_PATCH_FIELDS = [
+  "id",
+  "invoice_id",
+  "company_id",
+  "invoice_number",
+  "created_at",
+  "updated_at",
+  "subtotal",
+  "cgst_amount",
+  "sgst_amount",
+  "igst_amount",
+  "grand_total",
+  "cgstAmount",
+  "sgstAmount",
+  "igstAmount",
+  "grandTotal",
+];
 
+const FORBIDDEN_INVOICE_ITEM_PATCH_FIELDS = [
+  "product_name",
+  "hsn_code",
+  "unit",
+  "gst_percent",
+  "gst_amount",
+  "line_total",
+  "id",
+  "invoice_id",
+];
+
+const httpError = (message, statusCode) => {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+};
+
+const updateInvoice = async (invoiceId, companyId, invoiceData) => {
+  if (!invoiceId) {
+    throw httpError("Invoice id is required", 400);
+  }
+
+  const attemptedForbidden = FORBIDDEN_INVOICE_PATCH_FIELDS.filter((field) =>
+    Object.prototype.hasOwnProperty.call(invoiceData, field),
+  );
+  if (attemptedForbidden.length > 0) {
+    throw httpError(
+      `These fields cannot be updated via PATCH: ${attemptedForbidden.join(", ")}`,
+      400,
+    );
+  }
+
+  const { client_id, invoice_type, status, invoice_date, items } = invoiceData;
+
+  if (!Object.prototype.hasOwnProperty.call(invoiceData, "client_id") || !client_id) {
+    throw httpError("client_id is required", 400);
+  }
+  if (!Object.prototype.hasOwnProperty.call(invoiceData, "invoice_type") || invoice_type == null || String(invoice_type).trim() === "") {
+    throw httpError("invoice_type is required", 400);
+  }
+  if (!Object.prototype.hasOwnProperty.call(invoiceData, "invoice_date") || invoice_date == null || String(invoice_date).trim() === "") {
+    throw httpError("invoice_date is required", 400);
+  }
+  if (!Object.prototype.hasOwnProperty.call(invoiceData, "status") || status == null || String(status).trim() === "") {
+    throw httpError("status is required", 400);
+  }
+  if (!Object.prototype.hasOwnProperty.call(invoiceData, "items") || !Array.isArray(items) || items.length === 0) {
+    throw httpError("Invoice must contain at least one item", 400);
+  }
+
+  const normalizedInvoiceType = String(invoice_type).trim().toUpperCase();
+  if (normalizedInvoiceType !== "SALE") {
+    throw httpError("Invoice type must be SALE for this edit endpoint", 400);
+  }
+
+  const normalizedStatus = String(status).trim().toUpperCase();
+  if (normalizedStatus === "CANCELLED") {
+    throw httpError("Cannot set status to CANCELLED via this edit endpoint", 400);
+  }
+  if (normalizedStatus !== "DRAFT" && normalizedStatus !== "COMPLETE") {
+    throw httpError("Invoice status must be DRAFT or COMPLETE", 400);
+  }
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (!item || typeof item !== "object") {
+      throw httpError(`Item at index ${i} is invalid`, 400);
+    }
+
+    const forbiddenOnItem = FORBIDDEN_INVOICE_ITEM_PATCH_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(item, field),
+    );
+    if (forbiddenOnItem.length > 0) {
+      throw httpError(
+        `Item fields cannot be supplied via PATCH: ${forbiddenOnItem.join(", ")}`,
+        400,
+      );
+    }
+
+    if (item.product_id === undefined || item.product_id === null || item.product_id === "") {
+      throw httpError("Each SALE item must include product_id", 400);
+    }
+    if (item.quantity === undefined || item.quantity === null || item.quantity === "") {
+      throw httpError("Each item must include quantity", 400);
+    }
+    if (item.rate === undefined || item.rate === null || item.rate === "") {
+      throw httpError("Each item must include rate", 400);
+    }
+
+    const quantity = Number(item.quantity);
+    const rate = Number(item.rate);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw httpError("quantity must be a valid positive number", 400);
+    }
+    if (!Number.isFinite(rate) || rate < 0) {
+      throw httpError("rate must be a valid non-negative number", 400);
+    }
+  }
+
+  const clientResult = await pool.query(
+    `
+      SELECT id, state
+      FROM client
+      WHERE id = $1 AND company_id = $2
+    `,
+    [client_id, companyId],
+  );
+
+  if (clientResult.rows.length === 0) {
+    throw httpError("Client not found", 404);
+  }
+
+  const client = clientResult.rows[0];
+  const clientState = client.state;
+
+  const companyResult = await pool.query(
+    `
+      SELECT id, state
+      FROM company
+      WHERE id = $1
+    `,
+    [companyId],
+  );
+
+  if (companyResult.rows.length === 0) {
+    throw httpError("Company not found", 404);
+  }
+
+  const companyState = companyResult.rows[0].state;
+
+  const productIds = [
+    ...new Set(items.map((item) => String(item.product_id))),
+  ];
+
+  const productResult = await pool.query(
+    `
+      SELECT id, product_name, hsn_code, unit, gst_percent
+      FROM products
+      WHERE company_id = $1
+        AND id = ANY($2::uuid[])
+    `,
+    [companyId, productIds],
+  );
+
+  if (productResult.rows.length !== productIds.length) {
+    throw httpError("One or more products were not found", 404);
+  }
+
+  const productMap = {};
+  productResult.rows.forEach((product) => {
+    productMap[String(product.id)] = product;
+  });
+
+  const invoiceItems = [];
+  let subtotal = 0;
+  let totalGST = 0;
+
+  for (const item of items) {
+    const product = productMap[String(item.product_id)];
+    if (!product) {
+      throw httpError("One or more products were not found", 404);
+    }
+
+    const quantity = Number(item.quantity);
+    const rate = Number(item.rate);
+    const gstPercent = Number(product.gst_percent);
+    const lineTotal = quantity * rate;
+    const gstAmount = (lineTotal * gstPercent) / 100;
+
+    subtotal += lineTotal;
+    totalGST += gstAmount;
+
+    invoiceItems.push({
+      product_id: product.id,
+      product_name: product.product_name,
+      hsn_code: product.hsn_code,
+      unit: product.unit,
+      quantity,
+      rate,
+      gst_percent: gstPercent,
+      line_total: lineTotal,
+      gst_amount: gstAmount,
+    });
+  }
+
+  let cgstAmount = 0;
+  let sgstAmount = 0;
+  let igstAmount = 0;
+
+  if (companyState === clientState) {
+    cgstAmount = totalGST / 2;
+    sgstAmount = totalGST / 2;
+  } else {
+    igstAmount = totalGST;
+  }
+
+  const grandTotal = subtotal + totalGST;
+
+  const db = await pool.connect();
+
+  try {
+    await db.query("BEGIN");
+
+    const existingResult = await db.query(
+      `
+        SELECT id, invoice_number, status
+        FROM invoices
+        WHERE id = $1 AND company_id = $2
+        FOR UPDATE
+      `,
+      [invoiceId, companyId],
+    );
+
+    if (existingResult.rows.length === 0) {
+      throw httpError("Invoice not found", 404);
+    }
+
+    const existing = existingResult.rows[0];
+    const existingStatus = String(existing.status || "").trim().toUpperCase();
+
+    if (existingStatus === "COMPLETE") {
+      throw httpError("Completed invoices cannot be edited", 409);
+    }
+    if (existingStatus === "CANCELLED") {
+      throw httpError("Cancelled invoices cannot be edited", 409);
+    }
+    if (existingStatus !== "DRAFT") {
+      throw httpError("Only DRAFT invoices can be edited", 409);
+    }
+
+    const updateHeaderResult = await db.query(
+      `
+        UPDATE invoices
+        SET
+          client_id = $1,
+          invoice_type = $2,
+          invoice_date = $3,
+          status = $4,
+          cgst_amount = $5,
+          sgst_amount = $6,
+          igst_amount = $7,
+          subtotal = $8,
+          grand_total = $9,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $10 AND company_id = $11
+        RETURNING id, invoice_number, invoice_type, status, invoice_date,
+                  subtotal, cgst_amount, sgst_amount, igst_amount, grand_total
+      `,
+      [
+        client_id,
+        normalizedInvoiceType,
+        invoice_date,
+        normalizedStatus,
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
+        subtotal,
+        grandTotal,
+        invoiceId,
+        companyId,
+      ],
+    );
+
+    if (updateHeaderResult.rows.length === 0) {
+      throw httpError("Invoice not found", 404);
+    }
+
+    const updatedInvoice = updateHeaderResult.rows[0];
+
+    await db.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [
+      invoiceId,
+    ]);
+
+    const placeholders = [];
+    const values = [];
+
+    invoiceItems.forEach((item, index) => {
+      const base = index * 10;
+      placeholders.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`,
+      );
+      values.push(
+        invoiceId,
+        item.product_id,
+        item.product_name,
+        item.hsn_code,
+        item.unit,
+        item.quantity,
+        item.rate,
+        item.gst_percent,
+        item.line_total,
+        item.gst_amount,
+      );
+    });
+
+    const invoiceItemResult = await db.query(
+      `
+        INSERT INTO invoice_items
+        (
+          invoice_id,
+          product_id,
+          product_name,
+          hsn_code,
+          unit,
+          quantity,
+          rate,
+          gst_percent,
+          line_total,
+          gst_amount
+        )
+        VALUES
+        ${placeholders.join(",")}
+        RETURNING *;
+      `,
+      values,
+    );
+
+    await db.query("COMMIT");
+
+    return {
+      invoice_id: updatedInvoice.id,
+      invoice_number: updatedInvoice.invoice_number,
+      invoice_type: updatedInvoice.invoice_type,
+      status: updatedInvoice.status,
+      invoice_date: updatedInvoice.invoice_date,
+      subtotal: updatedInvoice.subtotal,
+      cgstAmount: Number(updatedInvoice.cgst_amount),
+      sgstAmount: Number(updatedInvoice.sgst_amount),
+      igstAmount: Number(updatedInvoice.igst_amount),
+      grandTotal: Number(updatedInvoice.grand_total),
+      items: invoiceItemResult.rows,
+    };
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  } finally {
+    db.release();
+  }
+};
 
 module.exports = {
   createInvoice,
   getInvoices,
   getInvoice,
   downloadInvoicePDF,
+  updateInvoice,
 };
