@@ -74,6 +74,28 @@ const parseUnitQuery = (query = {}) => {
   return String(query.unit).trim();
 };
 
+const parseEnumQuery = (query = {}, fieldName, allowedValues) => {
+  const value = query[fieldName];
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  const raw = String(value).trim();
+  if (raw === "") {
+    return "";
+  }
+
+  const normalized = raw.toUpperCase();
+  if (!allowedValues.includes(normalized)) {
+    throw httpError(
+      `${fieldName} must be one of: ${allowedValues.join(", ")}`,
+      400
+    );
+  }
+
+  return normalized;
+};
+
 const escapeIlikePattern = (value) =>
   value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 
@@ -98,6 +120,7 @@ module.exports = {
   parseSearchQuery,
   parseGstPercentQuery,
   parseUnitQuery,
+  parseEnumQuery,
   escapeIlikePattern,
   buildPagination,
 };

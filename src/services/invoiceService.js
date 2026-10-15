@@ -3,6 +3,7 @@ const puppeteer = require("puppeteer");
 
 const { generateInvoiceHTML } = require("../templates/invoiceTemplate");
 const { decrypt } = require("../utils/encryption");
+const { escapeIlikePattern } = require("../utils/pagination");
 
 let browserPromise = null;
 
@@ -402,31 +403,75 @@ const invoiceId = invoiceResult.rows[0].id;
 
 
 
-const getInvoices = async (companyId) => {
-  const query = `
-    SELECT
-      i.id,
-      i.invoice_number,
-      i.invoice_type,
-      i.status,
-      i.invoice_date,
-      i.subtotal,
-      i.cgst_amount,
-      i.sgst_amount,
-      i.igst_amount,
-      i.grand_total,
-      i.client_id,
-      cl.name AS client_name,
-      cl.client_business
+const getInvoices = async (
+  companyId,
+  { page, limit, search = "", invoiceType = "", status = "" } = {}
+) => {
+  const values = [companyId];
+  let whereClause = "i.company_id = $1";
+
+  if (search) {
+    values.push(`%${escapeIlikePattern(search)}%`);
+    const searchParam = `$${values.length}`;
+    whereClause += ` AND (
+      i.invoice_number ILIKE ${searchParam} ESCAPE '\\'
+      OR cl.name ILIKE ${searchParam} ESCAPE '\\'
+      OR cl.client_business ILIKE ${searchParam} ESCAPE '\\'
+    )`;
+  }
+
+  if (invoiceType) {
+    values.push(invoiceType);
+    whereClause += ` AND i.invoice_type = $${values.length}`;
+  }
+
+  if (status) {
+    values.push(status);
+    whereClause += ` AND i.status = $${values.length}`;
+  }
+
+  const fromClause = `
     FROM invoices i
     JOIN client cl
       ON i.client_id = cl.id
-    WHERE i.company_id = $1
-    ORDER BY i.invoice_date DESC, i.created_at DESC;
+     AND cl.company_id = i.company_id
+    WHERE ${whereClause}
   `;
 
-  const result = await pool.query(query, [companyId]);
-  return result.rows;
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int AS count ${fromClause}`,
+    values
+  );
+  const totalItems = countResult.rows[0].count;
+
+  const limitParam = values.length + 1;
+  const offsetParam = values.length + 2;
+  const offset = (page - 1) * limit;
+
+  const result = await pool.query(
+    `
+      SELECT
+        i.id,
+        i.invoice_number,
+        i.invoice_type,
+        i.status,
+        i.invoice_date,
+        i.subtotal,
+        i.cgst_amount,
+        i.sgst_amount,
+        i.igst_amount,
+        i.grand_total,
+        i.client_id,
+        cl.name AS client_name,
+        cl.client_business
+      ${fromClause}
+      ORDER BY i.invoice_date DESC, i.created_at DESC, i.id DESC
+      LIMIT $${limitParam} OFFSET $${offsetParam}
+    `,
+    [...values, limit, offset]
+  );
+
+  return { data: result.rows, totalItems };
 };
 
 const getInvoice = async (companyId, invoiceId) => {

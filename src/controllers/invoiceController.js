@@ -5,6 +5,15 @@ const {
   downloadInvoicePDF,
   updateInvoice,
 } = require("../services/invoiceService");
+const {
+  parsePaginationQuery,
+  parseSearchQuery,
+  parseEnumQuery,
+  buildPagination,
+} = require("../utils/pagination");
+
+const INVOICE_TYPES = ["SALE", "PURCHASE"];
+const INVOICE_STATUSES = ["DRAFT", "COMPLETE", "CANCELLED"];
 
 const FORBIDDEN_INVOICE_PATCH_FIELDS = [
   "id",
@@ -43,17 +52,32 @@ const createInvoiceController = async (req, res) => {
 
 const getInvoicesController = async (req, res) => {
   try {
-    const invoices = await getInvoices(req.company.id);
+    const { page, limit } = parsePaginationQuery(req.query);
+    const search = parseSearchQuery(req.query);
+    const invoiceType = parseEnumQuery(req.query, "invoice_type", INVOICE_TYPES);
+    const status = parseEnumQuery(req.query, "status", INVOICE_STATUSES);
+    const { data, totalItems } = await getInvoices(req.company.id, {
+      page,
+      limit,
+      search,
+      invoiceType,
+      status,
+    });
 
     res.status(200).json({
       success: true,
       message: "Invoices fetched successfully",
-      data: invoices,
+      data,
+      pagination: buildPagination({ page, limit, totalItems }),
     });
   } catch (error) {
-    res.status(500).json({
+    const status = error.statusCode || 500;
+    if (status >= 500) {
+      console.log("invoices-->", error);
+    }
+    res.status(status).json({
       success: false,
-      message: error.message,
+      message: status === 500 ? "Internal server error" : error.message,
     });
   }
 };
