@@ -1,4 +1,7 @@
 const pool = require("../config/db");
+const { escapeIlikePattern } = require("../utils/pagination");
+
+const SEARCH_COLUMNS = ["product_name", "hsn_code"];
 
 const createProduct = async (companyId, productData) => {
   const products = Array.isArray(productData) ? productData : [productData];
@@ -19,32 +22,67 @@ const createProduct = async (companyId, productData) => {
   return result.rows;
 };
 
-const getProducts = async (companyId, minimal = false) => {
-  let query = "";
+const getProducts = async (
+  companyId,
+  {
+    minimal = false,
+    page,
+    limit,
+    search = "",
+    gstPercent = null,
+    unit = "",
+  } = {}
+) => {
+  const values = [companyId];
+  let whereClause = "company_id = $1";
 
-  if (minimal) {
-    query = `
-      SELECT
-        id,
-        product_name,
-        unit,
-        hsn_code
-      FROM products
-      WHERE company_id = $1
-      ORDER BY product_name;
-    `;
-  } else {
-    query = `
-      SELECT *
-      FROM products
-      WHERE company_id = $1
-      ORDER BY created_at DESC;
-    `;
+  if (search) {
+    values.push(`%${escapeIlikePattern(search)}%`);
+    const searchParam = `$${values.length}`;
+    const searchConditions = SEARCH_COLUMNS.map(
+      (column) => `${column} ILIKE ${searchParam} ESCAPE '\\'`
+    ).join(" OR ");
+    whereClause += ` AND (${searchConditions})`;
   }
 
-  const result = await pool.query(query, [companyId]);
+  if (gstPercent !== null) {
+    values.push(gstPercent);
+    whereClause += ` AND gst_percent = $${values.length}`;
+  }
 
-  return result.rows;
+  if (unit) {
+    values.push(unit);
+    whereClause += ` AND LOWER(unit) = LOWER($${values.length})`;
+  }
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM products WHERE ${whereClause}`,
+    values
+  );
+  const totalItems = countResult.rows[0].count;
+
+  const selectList = minimal
+    ? "id, product_name, unit, hsn_code"
+    : "*";
+  const orderBy = minimal
+    ? "product_name ASC, id ASC"
+    : "created_at DESC, id DESC";
+  const limitParam = values.length + 1;
+  const offsetParam = values.length + 2;
+  const offset = (page - 1) * limit;
+
+  const result = await pool.query(
+    `
+      SELECT ${selectList}
+      FROM products
+      WHERE ${whereClause}
+      ORDER BY ${orderBy}
+      LIMIT $${limitParam} OFFSET $${offsetParam}
+    `,
+    [...values, limit, offset]
+  );
+
+  return { data: result.rows, totalItems };
 };
 
 const getProductById = async (productId, companyId) => {

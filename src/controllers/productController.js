@@ -4,6 +4,13 @@ const {
   getProductById,
   updateProduct,
 } = require("../services/productService");
+const {
+  parsePaginationQuery,
+  parseSearchQuery,
+  parseGstPercentQuery,
+  parseUnitQuery,
+  buildPagination,
+} = require("../utils/pagination");
 
 const FORBIDDEN_PATCH_FIELDS = ["id", "company_id", "created_at", "updated_at"];
 
@@ -28,15 +35,34 @@ const createProductController = async (req, res) => {
 
 const getProductController = async (req, res) => {
   try {
-    const viewProducts = await getProducts(req.company.id, req.query.minimal === "true");
+    const { page, limit } = parsePaginationQuery(req.query);
+    const search = parseSearchQuery(req.query);
+    const gstPercent = parseGstPercentQuery(req.query);
+    const unit = parseUnitQuery(req.query);
+    const { data, totalItems } = await getProducts(req.company.id, {
+      minimal: req.query.minimal === "true",
+      page,
+      limit,
+      search,
+      gstPercent,
+      unit,
+    });
+
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
-      data: viewProducts,
+      data,
+      pagination: buildPagination({ page, limit, totalItems }),
     });
   } catch (error) {
-    console.log('products-->',error)
-    res.status(500).json({ success: false, message: "Internal server error" });
+    const status = error.statusCode || 500;
+    if (status >= 500) {
+      console.log("products-->", error);
+    }
+    res.status(status).json({
+      success: false,
+      message: status === 500 ? "Internal server error" : error.message,
+    });
   }
 };
 

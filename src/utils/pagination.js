@@ -37,11 +37,41 @@ const parsePaginationQuery = (query = {}) => {
 };
 
 const parseSearchQuery = (query = {}) => {
-  if (typeof query.search !== "string") {
+  if (query.search === undefined || query.search === null) {
     return "";
   }
 
-  return query.search.trim();
+  return String(query.search).trim();
+};
+
+const parseGstPercentQuery = (query = {}) => {
+  if (query.gst_percent === undefined || query.gst_percent === null) {
+    return null;
+  }
+
+  const raw = String(query.gst_percent).trim();
+  if (raw === "") {
+    return null;
+  }
+
+  if (!/^\d+(\.\d+)?$/.test(raw)) {
+    throw httpError("gst_percent must be a valid numeric percentage", 400);
+  }
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value > 100) {
+    throw httpError("gst_percent must be a finite percentage between 0 and 100", 400);
+  }
+
+  return value;
+};
+
+const parseUnitQuery = (query = {}) => {
+  if (query.unit === undefined || query.unit === null) {
+    return "";
+  }
+
+  return String(query.unit).trim();
 };
 
 const escapeIlikePattern = (value) =>
@@ -66,6 +96,8 @@ module.exports = {
   MAX_LIMIT,
   parsePaginationQuery,
   parseSearchQuery,
+  parseGstPercentQuery,
+  parseUnitQuery,
   escapeIlikePattern,
   buildPagination,
 };
