@@ -1,4 +1,14 @@
 const pool = require("../config/db");
+const { escapeIlikePattern } = require("../utils/pagination");
+
+const SEARCH_COLUMNS = [
+  "name",
+  "client_business",
+  "gstin",
+  "email",
+  "phone",
+  "state",
+];
 
 const createClient = async (clientData, companyId) => {
   const {
@@ -49,30 +59,48 @@ const createClient = async (clientData, companyId) => {
   return result.rows[0];
 };
 
-const getClients = async (companyId, minimal = false) => {
-  let query = "";
+const getClients = async (
+  companyId,
+  { minimal = false, page, limit, search = "" } = {}
+) => {
+  const values = [companyId];
+  let whereClause = "company_id = $1";
 
-  if (minimal) {
-    query = `
-      SELECT
-        id,
-        client_business
-      FROM client
-      WHERE company_id = $1
-      ORDER BY client_business;
-    `;
-  } else {
-    query = `
-      SELECT *
-      FROM client
-      WHERE company_id = $1
-      ORDER BY created_at DESC;
-    `;
+  if (search) {
+    values.push(`%${escapeIlikePattern(search)}%`);
+    const searchParam = `$${values.length}`;
+    const searchConditions = SEARCH_COLUMNS.map(
+      (column) => `${column} ILIKE ${searchParam} ESCAPE '\\'`
+    ).join(" OR ");
+    whereClause += ` AND (${searchConditions})`;
   }
 
-  const result = await pool.query(query, [companyId]);
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM client WHERE ${whereClause}`,
+    values
+  );
+  const totalItems = countResult.rows[0].count;
 
-  return result.rows;
+  const selectList = minimal ? "id, client_business" : "*";
+  const orderBy = minimal
+    ? "client_business ASC NULLS LAST, id ASC"
+    : "created_at DESC, id DESC";
+  const limitParam = values.length + 1;
+  const offsetParam = values.length + 2;
+  const offset = (page - 1) * limit;
+
+  const result = await pool.query(
+    `
+      SELECT ${selectList}
+      FROM client
+      WHERE ${whereClause}
+      ORDER BY ${orderBy}
+      LIMIT $${limitParam} OFFSET $${offsetParam}
+    `,
+    [...values, limit, offset]
+  );
+
+  return { data: result.rows, totalItems };
 };
 
 const getClientById = async (clientId, companyId) => {
